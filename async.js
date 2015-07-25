@@ -1,14 +1,14 @@
+var async = require('async');
+
 var traverse = module.exports = function (obj) {
-    return new Traverse(obj);
+    return new TraverseAsync(obj);
 };
 
-traverse.async = require('./async');
-
-function Traverse (obj) {
+function TraverseAsync (obj) {
     this.value = obj;
 }
 
-Traverse.prototype.get = function (ps) {
+TraverseAsync.prototype.get = function (ps) {
     var node = this.value;
     for (var i = 0; i < ps.length; i ++) {
         var key = ps[i];
@@ -21,7 +21,7 @@ Traverse.prototype.get = function (ps) {
     return node;
 };
 
-Traverse.prototype.has = function (ps) {
+TraverseAsync.prototype.has = function (ps) {
     var node = this.value;
     for (var i = 0; i < ps.length; i ++) {
         var key = ps[i];
@@ -33,7 +33,7 @@ Traverse.prototype.has = function (ps) {
     return true;
 };
 
-Traverse.prototype.set = function (ps, value) {
+TraverseAsync.prototype.set = function (ps, value) {
     var node = this.value;
     for (var i = 0; i < ps.length - 1; i ++) {
         var key = ps[i];
@@ -44,49 +44,69 @@ Traverse.prototype.set = function (ps, value) {
     return value;
 };
 
-Traverse.prototype.map = function (cb) {
-    return walk(this.value, cb, true);
+TraverseAsync.prototype.map = function (cb, done) {
+    walk(this.value, cb, true, function (err, node) {
+        done(err, node);
+    });
 };
 
-Traverse.prototype.forEach = function (cb) {
-    this.value = walk(this.value, cb, false);
-    return this.value;
+TraverseAsync.prototype.forEach = function (cb, done) {
+    var that = this;
+    walk(this.value, cb, false, function (err, node) {
+        that.value = node;
+        done(err, that.value);
+    });
 };
 
-Traverse.prototype.reduce = function (cb, init) {
-    var skip = arguments.length === 1;
-    var acc = skip ? this.value : init;
-    this.forEach(function (x) {
-        if (!this.isRoot || !skip) {
-            acc = cb.call(this, acc, x);
+TraverseAsync.prototype.reduce = function (cb, init, done, opts) {
+    opts = opts || {};
+    var onRoot = opts.onRoot;
+    var acc = init;
+    this.forEach(function (x, _cb) {
+        if (onRoot || !this.isRoot) {
+            cb.call(this, acc, x, function (err, res) {
+                acc = res;
+                _cb(err);
+            });
         }
+        else {
+            _cb();
+        }
+    }, function (err) {
+        done(err, acc);
     });
-    return acc;
 };
 
-Traverse.prototype.paths = function () {
-    var acc = [];
-    this.forEach(function (x) {
-        acc.push(this.path); 
+TraverseAsync.prototype.paths = function (done) {
+    this.reduce(function (acc, x, cb) {
+        acc.push(this.path);
+        cb(null, acc);
+    }, [], function (err, acc) {
+        done(err, acc);
+    }, {
+        onRoot: true
     });
-    return acc;
 };
 
-Traverse.prototype.nodes = function () {
-    var acc = [];
-    this.forEach(function (x) {
+TraverseAsync.prototype.nodes = function (done) {
+    this.reduce(function (acc, x, cb) {
         acc.push(this.node);
+        cb(null, acc);
+    }, [], function (err, acc) {
+        done(err, acc);
+    }, {
+        onRoot: true
     });
-    return acc;
 };
 
-Traverse.prototype.clone = function () {
+TraverseAsync.prototype.clone = function (done) {
     var parents = [], nodes = [];
     
-    return (function clone (src) {
+    (function clone (src, done) {
         for (var i = 0; i < parents.length; i++) {
             if (parents[i] === src) {
-                return nodes[i];
+                done(null, nodes[i]);
+                return;
             }
         }
         
@@ -96,26 +116,29 @@ Traverse.prototype.clone = function () {
             parents.push(src);
             nodes.push(dst);
             
-            forEach(objectKeys(src), function (key) {
-                dst[key] = clone(src[key]);
+            async.eachSeries(objectKeys(src), function (key, cb) {
+                clone(src[key], function (err, res) {
+                    dst[key] = res;
+                    cb(err);
+                });
+            }, function (err) {
+                parents.pop();
+                nodes.pop();
+                done(null, dst);
             });
-            
-            parents.pop();
-            nodes.pop();
-            return dst;
         }
         else {
-            return src;
+            done(null, src);
         }
-    })(this.value);
+    })(this.value, done);
 };
 
-function walk (root, cb, immutable) {
+function walk (root, cb, immutable, done) {
     var path = [];
     var parents = [];
     var alive = true;
-    
-    return (function walker (node_) {
+
+    (function walker (node_, _cb) {
         var node = immutable ? copy(node_) : node_;
         var modifiers = {};
         
@@ -160,7 +183,7 @@ function walk (root, cb, immutable) {
             block : function () { keepGoing = false }
         };
         
-        if (!alive) return state;
+        if (!alive) return _cb(null, state);
         
         function updateState() {
             if (typeof state.node === 'object' && state.node !== null) {
@@ -189,43 +212,58 @@ function walk (root, cb, immutable) {
         updateState();
         
         // use return values to update if defined
-        var ret = cb.call(state, state.node);
-        if (ret !== undefined && state.update) state.update(ret);
+        cb.call(state, state.node, function (err, ret) {
+
+            if (ret !== undefined && state.update) state.update(ret);
         
-        if (modifiers.before) modifiers.before.call(state, state.node);
-        
-        if (!keepGoing) return state;
-        
-        if (typeof state.node == 'object'
-        && state.node !== null && !state.circular) {
-            parents.push(state);
+            if (modifiers.before) modifiers.before.call(state, state.node);
             
-            updateState();
+            if (!keepGoing) return _cb(null, state);
+
+            var postop = function (err) {
+                parents.pop();
+                if (modifiers.after) modifiers.after.call(state, state.node);
+                _cb(err, state);
+            };
             
-            forEach(state.keys, function (key, i) {
-                path.push(key);
+            if (typeof state.node == 'object'
+            && state.node !== null && !state.circular) {
+                parents.push(state);
                 
-                if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
+                updateState();
                 
-                var child = walker(state.node[key]);
-                if (immutable && hasOwnProperty.call(state.node, key)) {
-                    state.node[key] = child.node;
-                }
-                
-                child.isLast = i == state.keys.length - 1;
-                child.isFirst = i == 0;
-                
-                if (modifiers.post) modifiers.post.call(state, child);
-                
-                path.pop();
-            });
-            parents.pop();
-        }
-        
-        if (modifiers.after) modifiers.after.call(state, state.node);
-        
-        return state;
-    })(root).node;
+                var i = 0;
+                async.eachSeries(state.keys, function (key, __cb) {
+                    i++;
+                    path.push(key);
+                    
+                    if (modifiers.pre) modifiers.pre.call(state, state.node[key], key);
+                    
+                    walker(state.node[key], function (err, child) {
+                        if (immutable && hasOwnProperty.call(state.node, key)) {
+                            state.node[key] = child.node;
+                        }
+                        
+                        child.isLast = i == state.keys.length - 1;
+                        child.isFirst = i == 0;
+                        
+                        if (modifiers.post) modifiers.post.call(state, child);
+                        
+                        path.pop();
+
+                        __cb(null);
+                    });
+                }, function (err) {
+                    postop(err);
+                });
+            }
+            else {
+                postop();
+            }
+        });
+    })(root, function (err, state) {
+        done && done(err, state.node);
+    });
 }
 
 function copy (src) {
@@ -303,10 +341,10 @@ var forEach = function (xs, fn) {
     }
 };
 
-forEach(objectKeys(Traverse.prototype), function (key) {
+forEach(objectKeys(TraverseAsync.prototype), function (key) {
     traverse[key] = function (obj) {
         var args = [].slice.call(arguments, 1);
-        var t = new Traverse(obj);
+        var t = new TraverseAsync(obj);
         return t[key].apply(t, args);
     };
 });
