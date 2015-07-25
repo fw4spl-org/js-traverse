@@ -44,8 +44,10 @@ TraverseAsync.prototype.set = function (ps, value) {
     return value;
 };
 
-TraverseAsync.prototype.map = function (cb) {
-    return walk(this.value, cb, true);
+TraverseAsync.prototype.map = function (cb, done) {
+    walk(this.value, cb, true, function (err, node) {
+        done(err, node);
+    });
 };
 
 TraverseAsync.prototype.forEach = function (cb, done) {
