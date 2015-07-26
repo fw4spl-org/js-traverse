@@ -58,10 +58,12 @@ TraverseAsync.prototype.forEach = function (cb, done) {
     });
 };
 
-TraverseAsync.prototype.reduce = function (cb, init, done) {
+TraverseAsync.prototype.reduce = function (cb, init, done, opts) {
+    opts = opts || {};
+    var onRoot = opts.onRoot;
     var acc = init;
     this.forEach(function (x, _cb) {
-        if (!this.isRoot) {
+        if (onRoot || !this.isRoot) {
             cb.call(this, acc, x, function (err, res) {
                 acc = res;
                 _cb(err);
@@ -75,20 +77,15 @@ TraverseAsync.prototype.reduce = function (cb, init, done) {
     });
 };
 
-TraverseAsync.prototype.paths = function () {
-    var acc = [];
-    this.forEach(function (x) {
-        acc.push(this.path); 
+TraverseAsync.prototype.paths = function (done) {
+    this.reduce(function (acc, x, cb) {
+        acc.push(this.path);
+        cb(null, acc);
+    }, [], function (err, acc) {
+        done(err, acc);
+    }, {
+        onRoot: true
     });
-    return acc;
-};
-
-TraverseAsync.prototype.nodes = function () {
-    var acc = [];
-    this.forEach(function (x) {
-        acc.push(this.node);
-    });
-    return acc;
 };
 
 TraverseAsync.prototype.clone = function () {
