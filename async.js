@@ -99,13 +99,14 @@ TraverseAsync.prototype.nodes = function (done) {
     });
 };
 
-TraverseAsync.prototype.clone = function () {
+TraverseAsync.prototype.clone = function (done) {
     var parents = [], nodes = [];
     
-    return (function clone (src) {
+    (function clone (src, done) {
         for (var i = 0; i < parents.length; i++) {
             if (parents[i] === src) {
-                return nodes[i];
+                done(null, nodes[i]);
+                return;
             }
         }
         
@@ -115,18 +116,21 @@ TraverseAsync.prototype.clone = function () {
             parents.push(src);
             nodes.push(dst);
             
-            forEach(objectKeys(src), function (key) {
-                dst[key] = clone(src[key]);
+            async.eachSeries(objectKeys(src), function (key, cb) {
+                clone(src[key], function (err, res) {
+                    dst[key] = res;
+                    cb(err);
+                });
+            }, function (err) {
+                parents.pop();
+                nodes.pop();
+                done(null, dst);
             });
-            
-            parents.pop();
-            nodes.pop();
-            return dst;
         }
         else {
-            return src;
+            done(null, src);
         }
-    })(this.value);
+    })(this.value, done);
 };
 
 function walk (root, cb, immutable, done) {
