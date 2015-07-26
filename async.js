@@ -58,15 +58,21 @@ TraverseAsync.prototype.forEach = function (cb, done) {
     });
 };
 
-TraverseAsync.prototype.reduce = function (cb, init) {
-    var skip = arguments.length === 1;
-    var acc = skip ? this.value : init;
-    this.forEach(function (x) {
-        if (!this.isRoot || !skip) {
-            acc = cb.call(this, acc, x);
+TraverseAsync.prototype.reduce = function (cb, init, done) {
+    var acc = init;
+    this.forEach(function (x, _cb) {
+        if (!this.isRoot) {
+            cb.call(this, acc, x, function (err, res) {
+                acc = res;
+                _cb(err);
+            });
         }
+        else {
+            _cb();
+        }
+    }, function (err) {
+        done(err, acc);
     });
-    return acc;
 };
 
 TraverseAsync.prototype.paths = function () {
