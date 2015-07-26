@@ -59,6 +59,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "async": "^1.4.0"
+    "async": "~1.4"
   }
 }
