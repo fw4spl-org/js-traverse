@@ -88,6 +88,17 @@ TraverseAsync.prototype.paths = function (done) {
     });
 };
 
+TraverseAsync.prototype.nodes = function (done) {
+    this.reduce(function (acc, x, cb) {
+        acc.push(this.node);
+        cb(null, acc);
+    }, [], function (err, acc) {
+        done(err, acc);
+    }, {
+        onRoot: true
+    });
+};
+
 TraverseAsync.prototype.clone = function () {
     var parents = [], nodes = [];
     
