@@ -225,6 +225,10 @@ function walk (root, cb, immutable, done) {
                 if (modifiers.after) modifiers.after.call(state, state.node);
                 _cb(err, state);
             };
+
+            if (err) {
+                postop(err);
+            }
             
             if (typeof state.node == 'object'
             && state.node !== null && !state.circular) {
